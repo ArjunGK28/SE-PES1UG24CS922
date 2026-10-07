@@ -51,6 +51,7 @@ class Board:
         self.last_points = 0
         self.last_combo = 0
         self.blasts = []
+        self.hint = None
         self.reset()
 
     def reset(self):
@@ -59,6 +60,7 @@ class Board:
         self.last_points = 0
         self.last_combo = 0
         self.blasts = []
+        self.hint = None
         self.selected = None
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE):
@@ -123,6 +125,19 @@ class Board:
         for _, cells in self.find_runs():
             matched.update(cells)
         return matched
+
+    def find_hint(self):
+        grid = self.grid
+        for r in range(GRID_SIZE):
+            for c in range(GRID_SIZE):
+                for r2, c2 in ((r, c + 1), (r + 1, c)):
+                    if r2 < GRID_SIZE and c2 < GRID_SIZE:
+                        grid[r][c], grid[r2][c2] = grid[r2][c2], grid[r][c]
+                        makes_match = bool(self.find_runs())
+                        grid[r][c], grid[r2][c2] = grid[r2][c2], grid[r][c]
+                        if makes_match:
+                            return (r, c), (r2, c2)
+        return None
 
     def drop_and_refill(self):
         for c in range(GRID_SIZE):
@@ -200,6 +215,7 @@ class Board:
             return False
 
         self.moves_remaining -= 1
+        self.hint = None
         self.last_points, self.last_combo = self.resolve_matches(swapped=(pos1, pos2))
         self.score += self.last_points
         return True
@@ -241,6 +257,25 @@ class Board:
         else:
             stripe = pygame.Rect(x + mid - 4, y + 9, 8, TILE_SIZE - 18)
         pygame.draw.rect(surface, (255, 255, 255), stripe, border_radius=4)
+
+    def render_hint(self, surface):
+        pulse = (math.sin(pygame.time.get_ticks() / 300) + 1) / 2
+        for r, c in self.hint:
+            shimmer = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+            tile_rect = shimmer.get_rect().inflate(-4, -4)
+            pygame.draw.rect(
+                shimmer, (255, 255, 255, int(30 + 60 * pulse)), tile_rect, border_radius=10
+            )
+            pygame.draw.rect(
+                shimmer,
+                (255, 240, 150, int(80 + 175 * pulse)),
+                tile_rect,
+                width=3,
+                border_radius=10,
+            )
+            surface.blit(
+                shimmer, (self.offset_x + c * TILE_SIZE, self.offset_y + r * TILE_SIZE)
+            )
 
     def render_blasts(self, surface):
         now = pygame.time.get_ticks()
@@ -290,4 +325,6 @@ class Board:
                         surface, (255, 255, 255), sel_rect, width=4, border_radius=10
                     )
 
+        if self.hint:
+            self.render_hint(surface)
         self.render_blasts(surface)
