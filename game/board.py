@@ -3,6 +3,7 @@ import pygame
 
 GRID_SIZE = 8
 TILE_SIZE = 60
+GEM_POINTS = 10
 GEM_COLORS = [
     (220, 50, 50),   # Red
     (50, 200, 50),   # Green
@@ -44,11 +45,15 @@ class Board:
         self.selected = None
         self.score = 0
         self.moves_remaining = max_moves
+        self.last_points = 0
+        self.last_combo = 0
         self.reset()
 
     def reset(self):
         self.score = 0
         self.moves_remaining = self.max_moves
+        self.last_points = 0
+        self.last_combo = 0
         self.selected = None
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE):
@@ -133,16 +138,18 @@ class Board:
                 self.grid[r][c] = gem
 
     def resolve_matches(self):
-        total_cleared = 0
+        points = 0
+        cascades = 0
         while True:
             matches = self.find_matches()
             if not matches:
                 break
-            total_cleared += len(matches)
+            cascades += 1
+            points += len(matches) * GEM_POINTS * cascades
             for r, c in matches:
                 self.grid[r][c] = None
             self.drop_and_refill()
-        return total_cleared
+        return points, cascades
 
     def process_swap(self, pos1, pos2):
         if not self.is_adjacent(pos1, pos2) or self.is_game_over() or self.is_animating():
@@ -156,8 +163,8 @@ class Board:
             return False
 
         self.moves_remaining -= 1
-        cleared = self.resolve_matches()
-        self.score += cleared * 10
+        self.last_points, self.last_combo = self.resolve_matches()
+        self.score += self.last_points
         return True
 
     def is_game_over(self):
