@@ -1,9 +1,11 @@
+import math
 import random
 import pygame
 
 GRID_SIZE = 8
 TILE_SIZE = 60
 GEM_POINTS = 10
+BLAST_FLASH_MS = 350
 GEM_COLORS = [
     (220, 50, 50),   # Red
     (50, 200, 50),   # Green
@@ -23,6 +25,7 @@ class Gem:
         self.current_y = (target_row - 2) * TILE_SIZE
         self.target_y = target_row * TILE_SIZE
         self.fall_speed = 12.0
+        self.special = None
 
     def update(self):
         if self.current_y < self.target_y:
@@ -47,6 +50,7 @@ class Board:
         self.moves_remaining = max_moves
         self.last_points = 0
         self.last_combo = 0
+        self.blasts = []
         self.reset()
 
     def reset(self):
@@ -54,6 +58,7 @@ class Board:
         self.moves_remaining = self.max_moves
         self.last_points = 0
         self.last_combo = 0
+        self.blasts = []
         self.selected = None
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE):
@@ -62,7 +67,7 @@ class Board:
                 gem.current_y = gem.target_y  
                 self.grid[r][c] = gem
 
-        self.resolve_matches()
+        self.resolve_matches(spawn_specials=False)
 
     def is_animating(self):
         for r in range(GRID_SIZE):
@@ -93,29 +98,30 @@ class Board:
         r2, c2 = pos2
         return abs(r1 - r2) + abs(c1 - c2) == 1
 
+    def same_color(self, pos1, pos2):
+        g1 = self.grid[pos1[0]][pos1[1]]
+        g2 = self.grid[pos2[0]][pos2[1]]
+        return g1 is not None and g2 is not None and g1.color == g2.color
+
+    def find_runs(self):
+        lines = [("row", [(r, c) for c in range(GRID_SIZE)]) for r in range(GRID_SIZE)]
+        lines += [("col", [(r, c) for r in range(GRID_SIZE)]) for c in range(GRID_SIZE)]
+
+        runs = []
+        for orientation, line in lines:
+            start = 0
+            for i in range(1, GRID_SIZE + 1):
+                if i < GRID_SIZE and self.same_color(line[start], line[i]):
+                    continue
+                if i - start >= 3:
+                    runs.append((orientation, line[start:i]))
+                start = i
+        return runs
+
     def find_matches(self):
         matched = set()
-
-        for r in range(GRID_SIZE):
-            for c in range(GRID_SIZE - 2):
-                if (
-                    self.grid[r][c]
-                    and self.grid[r][c + 1]
-                    and self.grid[r][c + 2]
-                    and self.grid[r][c].color == self.grid[r][c + 1].color == self.grid[r][c + 2].color
-                ):
-                    matched.update([(r, c), (r, c + 1), (r, c + 2)])
-
-        for r in range(GRID_SIZE - 2):
-            for c in range(GRID_SIZE):
-                if (
-                    self.grid[r][c]
-                    and self.grid[r + 1][c]
-                    and self.grid[r + 2][c]
-                    and self.grid[r][c].color == self.grid[r + 1][c].color == self.grid[r + 2][c].color
-                ):
-                    matched.update([(r, c), (r + 1, c), (r + 2, c)])
-
+        for _, cells in self.find_runs():
+            matched.update(cells)
         return matched
 
     def drop_and_refill(self):
@@ -137,18 +143,49 @@ class Board:
                 gem.current_y = -((empty_slots - r) * TILE_SIZE)
                 self.grid[r][c] = gem
 
-    def resolve_matches(self):
+    def detonate_specials(self, cleared):
+        pending = [(r, c) for r, c in cleared if self.grid[r][c].special]
+        while pending:
+            r, c = pending.pop()
+            if self.grid[r][c].special == "row":
+                line = [(r, i) for i in range(GRID_SIZE)]
+                self.blasts.append(("row", r, pygame.time.get_ticks()))
+            else:
+                line = [(i, c) for i in range(GRID_SIZE)]
+                self.blasts.append(("col", c, pygame.time.get_ticks()))
+
+            for pos in line:
+                if pos not in cleared:
+                    cleared.add(pos)
+                    if self.grid[pos[0]][pos[1]].special:
+                        pending.append(pos)
+
+    def resolve_matches(self, swapped=(), spawn_specials=True):
         points = 0
         cascades = 0
         while True:
-            matches = self.find_matches()
-            if not matches:
+            runs = self.find_runs()
+            if not runs:
                 break
             cascades += 1
-            points += len(matches) * GEM_POINTS * cascades
-            for r, c in matches:
+
+            cleared = set()
+            for _, cells in runs:
+                cleared.update(cells)
+            self.detonate_specials(cleared)
+            points += len(cleared) * GEM_POINTS * cascades
+
+            if spawn_specials:
+                for orientation, cells in runs:
+                    if len(cells) >= 4:
+                        r, c = next((pos for pos in cells if pos in swapped), cells[1])
+                        self.grid[r][c].special = orientation
+                        cleared.discard((r, c))
+
+            for r, c in cleared:
                 self.grid[r][c] = None
             self.drop_and_refill()
+            swapped = ()
         return points, cascades
 
     def process_swap(self, pos1, pos2):
@@ -163,7 +200,7 @@ class Board:
             return False
 
         self.moves_remaining -= 1
-        self.last_points, self.last_combo = self.resolve_matches()
+        self.last_points, self.last_combo = self.resolve_matches(swapped=(pos1, pos2))
         self.score += self.last_points
         return True
 
@@ -182,6 +219,46 @@ class Board:
             for c in range(GRID_SIZE):
                 if self.grid[r][c]:
                     self.grid[r][c].update()
+
+        now = pygame.time.get_ticks()
+        self.blasts = [b for b in self.blasts if now - b[2] < BLAST_FLASH_MS]
+
+    def render_special(self, surface, gem, x, y):
+        pulse = (math.sin(pygame.time.get_ticks() / 180) + 1) / 2
+        glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        pygame.draw.rect(
+            glow,
+            (255, 255, 255, int(110 + 145 * pulse)),
+            glow.get_rect(),
+            width=5,
+            border_radius=12,
+        )
+        surface.blit(glow, (x, y))
+
+        mid = TILE_SIZE // 2
+        if gem.special == "row":
+            stripe = pygame.Rect(x + 9, y + mid - 4, TILE_SIZE - 18, 8)
+        else:
+            stripe = pygame.Rect(x + mid - 4, y + 9, 8, TILE_SIZE - 18)
+        pygame.draw.rect(surface, (255, 255, 255), stripe, border_radius=4)
+
+    def render_blasts(self, surface):
+        now = pygame.time.get_ticks()
+        for orientation, index, started in self.blasts:
+            fade = 1 - (now - started) / BLAST_FLASH_MS
+            if fade <= 0:
+                continue
+            if orientation == "row":
+                rect = pygame.Rect(
+                    self.offset_x, self.offset_y + index * TILE_SIZE, GRID_SIZE * TILE_SIZE, TILE_SIZE
+                )
+            else:
+                rect = pygame.Rect(
+                    self.offset_x + index * TILE_SIZE, self.offset_y, TILE_SIZE, GRID_SIZE * TILE_SIZE
+                )
+            flash = pygame.Surface(rect.size, pygame.SRCALPHA)
+            flash.fill((255, 255, 255, int(210 * fade)))
+            surface.blit(flash, rect.topleft)
 
     def render(self, surface):
         board_rect = pygame.Rect(
@@ -202,6 +279,8 @@ class Board:
                     pygame.draw.rect(
                         surface, (255, 255, 255), tile_rect, width=1, border_radius=10
                     )
+                    if gem.special:
+                        self.render_special(surface, gem, x, int(y))
 
                 if self.selected == (r, c):
                     sel_x = self.offset_x + c * TILE_SIZE
@@ -210,3 +289,5 @@ class Board:
                     pygame.draw.rect(
                         surface, (255, 255, 255), sel_rect, width=4, border_radius=10
                     )
+
+        self.render_blasts(surface)
