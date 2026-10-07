@@ -151,12 +151,11 @@ class Board:
         self.swap_gems(pos1, pos2)
         matches = self.find_matches()
 
-        self.moves_remaining -= 1
-
         if not matches:
             self.swap_gems(pos1, pos2)
             return False
 
+        self.moves_remaining -= 1
         cleared = self.resolve_matches()
         self.score += cleared * 10
         return True
