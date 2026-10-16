@@ -53,6 +53,30 @@ Applications on file: 1
 Upload to bureau skipped (no network)                   <- #21
 ```
 
+## Results after the fixes
+
+| Tool | Before | After |
+|------|--------|-------|
+| Pylint | 5.17/10 | 10.00/10 |
+| Bandit | 8 issues (2 High, 1 Medium, 5 Low) | No issues identified (1 justified `# nosec B402`) |
+| Flake8 | 22 issues | 0 issues |
+
+Raw reports: [`reports/after/`](reports/after/). An empty `flake8_report.txt` means no issues.
+
+```
+EMI for 5L @ 9% for 5 years: 10379.18
+Eligible (score 760, income 15000, EMIs 12000): False
+Eligible (unknown loan type 'crypto'): False
+Eligible (score 780, income 60000, EMIs 10000, home): True
+Max loan for income 40000: 722600.6
+Last schedule row: (12, 87.97, 0.0)
+Risk band for 950: INVALID
+Interest saved by prepaying 50000: 12275.07
+Saved as: LN-93169916
+Applications on file: 1
+Upload to bureau skipped (no network)
+```
+
 ## Commit plan
 
 | Commit | Scope | Rows |
